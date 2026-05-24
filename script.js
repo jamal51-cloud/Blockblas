@@ -1,23 +1,35 @@
 const GRID_SIZE = 8;
 let gridState = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
 let score = 0;
+let highScore = localStorage.getItem('block_blast_highscore') || 0; // Ambil high score lama
+let comboCount = 0; // Menghitung run combo berturut-turut
 let selectedBlockIndex = null;
 let currentOptions = [];
 
-// Template bentuk balok (1 = terisi, 0 = kosong)
+// Template bentuk balok
 const BLOCK_SHAPES = [
-    { shape: [[1]], color: '#ff5722' }, // 1x1
-    { shape: [[1, 1]], color: '#2196f3' }, // 1x2
-    { shape: [[1, 1, 1]], color: '#4caf50' }, // 1x3
-    { shape: [[1], [1]], color: '#ffeb3b' }, // 2x1 vertikal
-    { shape: [[1, 1], [1, 1]], color: '#9c27b0' }, // 2x2 Kotak
-    { shape: [[1, 1, 1], [0, 1, 0]], color: '#00bcd4' } // T-Shape
+    { shape: [[1]], color: '#ff5722' }, 
+    { shape: [[1, 1]], color: '#2196f3' }, 
+    { shape: [[1, 1, 1]], color: '#4caf50' }, 
+    { shape: [[1], [1]], color: '#ffeb3b' }, 
+    { shape: [[1, 1], [1, 1]], color: '#9c27b0' }, 
+    { shape: [[1, 1, 1], [0, 1, 0]], color: '#00bcd4' } 
 ];
 
 const gridElement = document.getElementById('grid');
 const optionsContainer = document.getElementById('block-options');
 const scoreElement = document.getElementById('score');
 const restartBtn = document.getElementById('restart-btn');
+
+// Buat elemen High Score di atas secara dinamis
+const headerElement = document.querySelector('.header');
+const highScoreBoard = document.createElement('div');
+highScoreBoard.className = 'score-board';
+highScoreBoard.style.backgroundColor = '#4caf50';
+highScoreBoard.innerHTML = `Tertinggi: <span id="high-score">${highScore}</span>`;
+headerElement.appendChild(highScoreBoard);
+
+const highScoreElement = document.getElementById('high-score');
 
 // 1. Inisialisasi Grid Utama
 function createGrid() {
@@ -34,7 +46,6 @@ function createGrid() {
     }
 }
 
-// Update Tampilan Grid berdasarkan Array State
 function updateGridDOM() {
     const cells = gridElement.children;
     for (let r = 0; r < GRID_SIZE; r++) {
@@ -51,7 +62,7 @@ function updateGridDOM() {
     }
 }
 
-// 2. Generate 3 Pilihan Balok acak
+// 2. Generate Pilihan Balok
 function generateOptions() {
     optionsContainer.innerHTML = '';
     currentOptions = [];
@@ -64,7 +75,6 @@ function generateOptions() {
         blockOpt.classList.add('block-option');
         blockOpt.dataset.index = i;
         
-        // Atur grid css dinamis sesuai bentuk balok
         blockOpt.style.gridTemplateRows = `repeat(${randomBlock.shape.length}, 1fr)`;
         blockOpt.style.gridTemplateColumns = `repeat(${randomBlock.shape[0].length}, 1fr)`;
 
@@ -87,41 +97,42 @@ function generateOptions() {
 
 function selectBlockOption(index) {
     if (!currentOptions[index]) return;
-    
-    // Reset style pilihan sebelumnya
     document.querySelectorAll('.block-option').forEach(el => el.style.outline = '');
-    
     selectedBlockIndex = index;
     optionsContainer.children[index].style.outline = '3px solid #ffffff';
 }
 
-// 3. Logika Menaruh Balok di Grid
+// 3. Logika Taruh Balok
 function handleGridClick(row, col) {
     if (selectedBlockIndex === null) return;
     
     const block = currentOptions[selectedBlockIndex];
     if (!block) return;
 
-    // Cek apakah muat ditaruh di koordinat tersebut (kiri atas balok jadi patokan)
     if (canPlaceBlock(row, col, block.shape)) {
         placeBlock(row, col, block);
         
-        // Hapus balok dari pilihan
         optionsContainer.children[selectedBlockIndex].innerHTML = '';
         currentOptions[selectedBlockIndex] = null;
         selectedBlockIndex = null;
 
-        // Cek baris/kolom yang penuh (Blast!)
+        // Cek apakah ada baris yang hancur
         checkLineBlasts();
 
-        // Jika 3 pilihan balok sudah habis dipakai semua, isi ulang baru
         if (currentOptions.every(opt => opt === null)) {
             generateOptions();
         }
 
-        // Cek apakah game over
         if (isGameOver()) {
-            alert(`Game Over! Skor Akhir Kamu: ${score}`);
+            // Update High Score jika skor sekarang lebih tinggi
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('block_blast_highscore', highScore);
+                highScoreElement.innerText = highScore;
+                alert(`Gokil! Rekor Baru Tercipta: ${score} Poin!`);
+            } else {
+                alert(`Game Over! Skor Kamu: ${score}`);
+            }
             restartBtn.classList.remove('hidden');
         }
     }
@@ -133,10 +144,7 @@ function canPlaceBlock(startRow, startCol, shape) {
             if (shape[r][c] === 1) {
                 const targetRow = startRow + r;
                 const targetCol = startCol + c;
-
-                // Cek batas grid luar
                 if (targetRow >= GRID_SIZE || targetCol >= GRID_SIZE) return false;
-                // Cek apakah sudah terisi balok lain
                 if (gridState[targetRow][targetCol] !== 0) return false;
             }
         }
@@ -149,7 +157,7 @@ function placeBlock(startRow, startCol, block) {
         for (let c = 0; c < block.shape[r].length; c++) {
             if (block.shape[r][c] === 1) {
                 gridState[startRow + r][startCol + c] = block.color;
-                score += 10;
+                score += 10; // Skor standar naruh balok
             }
         }
     }
@@ -157,17 +165,15 @@ function placeBlock(startRow, startCol, block) {
     updateGridDOM();
 }
 
-// 4. Logika Menghancurkan Baris/Kolom yang penuh (Blast)
+// 4. Logika Blast + Fitur Combo Baru
 function checkLineBlasts() {
     let rowsToBlast = [];
     let colsToBlast = [];
 
-    // Cek baris penuh
     for (let r = 0; r < GRID_SIZE; r++) {
         if (gridState[r].every(cell => cell !== 0)) rowsToBlast.push(r);
     }
 
-    // Cek kolom penuh
     for (let c = 0; c < GRID_SIZE; c++) {
         let colFilled = true;
         for (let r = 0; r < GRID_SIZE; r++) {
@@ -179,28 +185,30 @@ function checkLineBlasts() {
         if (colFilled) colsToBlast.push(c);
     }
 
-    // Eksekusi Blast!
-    rowsToBlast.forEach(r => {
-        gridState[r] = Array(GRID_SIZE).fill(0);
-        score += 100;
-    });
+    const totalLines = rowsToBlast.length + colsToBlast.length;
 
-    colsToBlast.forEach(c => {
-        for (let r = 0; r < GRID_SIZE; r++) {
-            gridState[r][c] = 0;
-        }
-        score += 100;
-    });
+    if (totalLines > 0) {
+        comboCount += 1; // Naikkan tingkat combo
+        
+        // Rumus Skor: (Jumlah baris x 100) x bonus combo
+        let bonusScore = (totalLines * 100) * comboCount;
+        score += bonusScore;
 
-    if (rowsToBlast.length > 0 || colsToBlast.length > 0) {
+        // Eksekusi pembersihan grid
+        rowsToBlast.forEach(r => gridState[r] = Array(GRID_SIZE).fill(0));
+        colsToBlast.forEach(c => {
+            for (let r = 0; r < GRID_SIZE; r++) gridState[r][c] = 0;
+        });
+
         scoreElement.innerText = score;
         updateGridDOM();
+    } else {
+        comboCount = 0; // Reset combo kalau langkah ini gak ada yang hancur
     }
 }
 
 // 5. Cek Game Over
 function isGameOver() {
-    // Cari apakah masih ada ruang untuk balok tersisa di grid
     for (let i = 0; i < currentOptions.length; i++) {
         const block = currentOptions[i];
         if (!block) continue;
@@ -208,18 +216,19 @@ function isGameOver() {
         for (let r = 0; r < GRID_SIZE; r++) {
             for (let c = 0; c < GRID_SIZE; c++) {
                 if (canPlaceBlock(r, c, block.shape)) {
-                    return false; // Masih ada jalan!
+                    return false; 
                 }
             }
         }
     }
-    return true; // Tidak ada ruang tersisa untuk balok manapun
+    return true; 
 }
 
 // 6. Tombol Main Lagi
 restartBtn.addEventListener('click', () => {
     gridState = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
     score = 0;
+    comboCount = 0;
     scoreElement.innerText = score;
     selectedBlockIndex = null;
     restartBtn.classList.add('hidden');
@@ -227,6 +236,5 @@ restartBtn.addEventListener('click', () => {
     generateOptions();
 });
 
-// Jalankan Game Pertama Kali
 createGrid();
 generateOptions();
